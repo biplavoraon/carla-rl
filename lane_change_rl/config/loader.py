@@ -68,6 +68,7 @@ class CameraConfig:
     x: float
     y: float
     z: float
+    sensor_tick: float = 0.0
 
 
 @dataclass(frozen=True)

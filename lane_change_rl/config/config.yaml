@@ -46,7 +46,7 @@ traffic:
 
   num_vehicles: 30
 
-  hybrid_physics: true
+  hybrid_physics: false
 
   global_speed_difference: 0.0
 
@@ -63,6 +63,8 @@ camera:
   height: 600
 
   fov: 90
+
+  sensor_tick: 0.05
 
   x: 1.5
 

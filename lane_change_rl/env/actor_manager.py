@@ -141,6 +141,10 @@ class ActorManager:
                 "Unable to spawn ego vehicle."
             )
 
+        self._traffic_manager.register_ego_vehicle(
+            vehicle
+        )
+
         self._ego = EgoVehicle(vehicle=vehicle)
 
         self._logger.info(

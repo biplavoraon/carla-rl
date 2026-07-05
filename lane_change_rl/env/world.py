@@ -69,9 +69,24 @@ class CarlaWorld:
         # Load world
         # ---------------------------------------------------------
 
-        self.world = self.client.load_world(
-            self.cfg.map.town
-        )
+        current_world = self.client.get_world()
+
+        current_map = current_world.get_map().name.split("/")[-1]
+
+        if current_map != self.cfg.map.town:
+
+            print(f"Loading map {self.cfg.map.town}")
+
+            self.world = self.client.load_world_if_different(
+                self.cfg.map.town,
+                reset_settings=False,
+            )
+
+        else:
+
+            print("Reusing existing world")
+
+            self.world = current_world
 
         self.map = self.world.get_map()
 
@@ -88,6 +103,7 @@ class CarlaWorld:
         )
 
         self._apply_settings()
+
 
         # ---------------------------------------------------------
         # Managers
@@ -118,6 +134,17 @@ class CarlaWorld:
             self.map.name,
         )
 
+        print("World:", self.world.id)
+        print("Map:", self.world.get_map().name)
+        print(
+            "Vehicles:",
+            len(
+                self.world.get_actors().filter(
+                    "vehicle.*"
+                )
+            ),
+        )
+
     # ---------------------------------------------------------
     # Settings
     # ---------------------------------------------------------
@@ -144,7 +171,7 @@ class CarlaWorld:
 
     def tick(self):
 
-        self.world.tick()
+        return self.world.tick()
 
     # ---------------------------------------------------------
     # Cleanup

@@ -1,32 +1,30 @@
-"""
-Observation extraction for the Lane Change RL environment.
-
-This module converts the CARLA world into a fixed-length observation vector
-for the reinforcement learning agent.
-"""
-
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 import carla
+
 import numpy as np
 
-from lane_change_rl.env.utils import vehicle_speed
 
-
-MAX_DISTANCE = 100.0
+MAX_DISTANCE = 80.0
+MAX_SPEED = 30.0  # m/s (~108 km/h)
 
 
 @dataclass(slots=True)
-class NearbyVehicle:
-
+class VehicleInfo:
     vehicle: carla.Vehicle | None
 
     distance: float
 
     relative_speed: float
 
+
+@dataclass(slots=True)
+class LaneInfo:
+    front: VehicleInfo
+
+    rear: VehicleInfo
+
+    exists: bool
 
 class ObservationExtractor:
 
@@ -36,171 +34,196 @@ class ObservationExtractor:
 
         self.map = world.map
 
-        self.actor_manager = world.actors
+        self.actors = world.actors
 
-    # --------------------------------------------------------
-    # Public API
-    # --------------------------------------------------------
 
-    def observe(self) -> np.ndarray:
+    def observe(self):
 
-        ego = self.actor_manager.ego_vehicle
+        ego = self.actors.ego_vehicle
 
-        if ego is None:
-            raise RuntimeError("No ego vehicle exists.")
-
-        waypoint = self.map.get_waypoint(
+        wp = self.map.get_waypoint(
             ego.get_location()
         )
 
-        front = self._front_vehicle(
+        current = self._current_lane(
             ego,
-            waypoint
+            wp,
         )
 
-        left_front, left_rear = self._lane_neighbours(
+        left = self._adjacent_lane(
             ego,
-            waypoint.get_left_lane()
+            wp.get_left_lane(),
         )
 
-        right_front, right_rear = self._lane_neighbours(
+        right = self._adjacent_lane(
             ego,
-            waypoint.get_right_lane()
+            wp.get_right_lane(),
         )
 
-        observation = np.array(
-            [
-                self._normalize_speed(
-                    vehicle_speed(ego)
-                ),
-
-                waypoint.lane_id,
-
-                self._heading_error(
-                    ego,
-                    waypoint
-                ),
-
-                self._normalize_distance(
-                    front.distance
-                ),
-
-                self._normalize_relative_speed(
-                    front.relative_speed
-                ),
-
-                self._normalize_distance(
-                    left_front.distance
-                ),
-
-                self._normalize_distance(
-                    left_rear.distance
-                ),
-
-                self._normalize_distance(
-                    right_front.distance
-                ),
-
-                self._normalize_distance(
-                    right_rear.distance
-                ),
-
-                ego.get_speed_limit() / 120.0,
-
-                self._lane_offset(
-                    ego,
-                    waypoint
-                ),
-            ],
-            dtype=np.float32,
+        return self._build_vector(
+            ego,
+            wp,
+            current,
+            left,
+            right,
         )
 
-        return observation
+    def _collect_nearby_vehicles(
+        self,
+        ego: carla.Vehicle,
+    ):
 
-    # --------------------------------------------------------
-    # Front vehicle
-    # --------------------------------------------------------
+        ego_location = ego.get_location()
 
-    def _front_vehicle(
+        nearby = []
+
+        for vehicle in self.actors.traffic:
+
+            if vehicle.id == ego.id:
+                continue
+
+            distance = ego_location.distance(
+                vehicle.get_location()
+            )
+
+            # Ignore distant vehicles
+            if distance > 80.0:
+                continue
+
+            nearby.append(vehicle)
+
+        return nearby
+
+    def _projection(
+        self,
+        ego: carla.Vehicle,
+        other: carla.Vehicle,
+    ):
+
+        ego_tf = ego.get_transform()
+
+        forward = ego_tf.get_forward_vector()
+
+        delta = (
+            other.get_location()
+            - ego_tf.location
+        )
+
+        return (
+            delta.x * forward.x +
+            delta.y * forward.y +
+            delta.z * forward.z
+        )
+
+
+    def _current_lane(
         self,
         ego,
         waypoint,
-    ) -> NearbyVehicle:
+    ):
 
-        best = NearbyVehicle(
+        front = VehicleInfo(
             None,
-            MAX_DISTANCE,
+            float("inf"),
             0.0,
         )
 
-        ego_loc = ego.get_location()
+        rear = VehicleInfo(
+            None,
+            float("inf"),
+            0.0,
+        )
 
-        ego_speed = vehicle_speed(ego)
+        ego_speed = self._speed(ego)
 
-        for vehicle in self.actor_manager.traffic:
+        for vehicle in self._collect_nearby_vehicles(ego):
 
-            other_wp = self.map.get_waypoint(
+            wp = self.map.get_waypoint(
                 vehicle.get_location()
             )
 
-            if other_wp.road_id != waypoint.road_id:
+            if wp.road_id != waypoint.road_id:
                 continue
 
-            if other_wp.lane_id != waypoint.lane_id:
+            if wp.lane_id != waypoint.lane_id:
                 continue
 
-            distance = ego_loc.distance(
+            distance = ego.get_location().distance(
                 vehicle.get_location()
             )
 
-            if distance > best.distance:
-                continue
+            relative_speed = (
+                self._speed(vehicle)
+                - ego_speed
+            )
 
-            best = NearbyVehicle(
+            projection = self._projection(
+                ego,
                 vehicle,
-                distance,
-                vehicle_speed(vehicle) - ego_speed,
             )
 
-        return best
+            if projection > 0:
 
-    # --------------------------------------------------------
-    # Adjacent lane
-    # --------------------------------------------------------
+                if distance < front.distance:
 
-    def _lane_neighbours(
+                    front = VehicleInfo(
+                        vehicle,
+                        distance,
+                        relative_speed,
+                    )
+
+            else:
+
+                if distance < rear.distance:
+
+                    rear = VehicleInfo(
+                        vehicle,
+                        distance,
+                        relative_speed,
+                    )
+
+        return LaneInfo(
+            front=front,
+            rear=rear,
+            exists=True,
+        )
+
+
+    def _adjacent_lane(
         self,
-        ego,
-        lane,
-    ):
+        ego: carla.Vehicle,
+        lane: carla.Waypoint | None,
+    ) -> LaneInfo:
 
         if lane is None:
 
-            empty = NearbyVehicle(
-                None,
-                MAX_DISTANCE,
-                0,
+            empty = VehicleInfo(
+                vehicle=None,
+                distance=float("inf"),
+                relative_speed=0.0,
             )
 
-            return empty, empty
+            return LaneInfo(
+                front=empty,
+                rear=empty,
+                exists=False,
+            )
 
-        ego_loc = ego.get_location()
-
-        front = NearbyVehicle(
-            None,
-            MAX_DISTANCE,
-            0,
+        front = VehicleInfo(
+            vehicle=None,
+            distance=float("inf"),
+            relative_speed=0.0,
         )
 
-        rear = NearbyVehicle(
-            None,
-            MAX_DISTANCE,
-            0,
+        rear = VehicleInfo(
+            vehicle=None,
+            distance=float("inf"),
+            relative_speed=0.0,
         )
 
-        ego_speed = vehicle_speed(ego)
+        ego_speed = self._speed(ego)
 
-        for vehicle in self.actor_manager.traffic:
+        for vehicle in self._collect_nearby_vehicles(ego):
 
             wp = self.map.get_waypoint(
                 vehicle.get_location()
@@ -212,91 +235,129 @@ class ObservationExtractor:
             if wp.lane_id != lane.lane_id:
                 continue
 
-            dist = ego_loc.distance(
+            distance = ego.get_location().distance(
                 vehicle.get_location()
             )
 
-            if vehicle.get_location().x > ego_loc.x:
+            relative_speed = (
+                self._speed(vehicle)
+                - ego_speed
+            )
 
-                if dist < front.distance:
+            projection = self._projection(
+                ego,
+                vehicle,
+            )
 
-                    front = NearbyVehicle(
-                        vehicle,
-                        dist,
-                        vehicle_speed(vehicle) - ego_speed,
-                    )
+            info = VehicleInfo(
+                vehicle=vehicle,
+                distance=distance,
+                relative_speed=relative_speed,
+            )
+
+            if projection > 0:
+
+                if distance < front.distance:
+                    front = info
 
             else:
 
-                if dist < rear.distance:
+                if distance < rear.distance:
+                    rear = info
 
-                    rear = NearbyVehicle(
-                        vehicle,
-                        dist,
-                        vehicle_speed(vehicle) - ego_speed,
-                    )
-
-        return front, rear
-
-    # --------------------------------------------------------
-    # Normalization
-    # --------------------------------------------------------
-
-    def _normalize_distance(
-        self,
-        distance,
-    ):
-
-        return min(
-            distance,
-            MAX_DISTANCE,
-        ) / MAX_DISTANCE
-
-    def _normalize_speed(
-        self,
-        speed,
-    ):
-
-        return speed / 120.0
-
-    def _normalize_relative_speed(
-        self,
-        speed,
-    ):
-
-        return np.clip(
-            speed / 50.0,
-            -1,
-            1,
+        return LaneInfo(
+            front=front,
+            rear=rear,
+            exists=True,
         )
 
-    # --------------------------------------------------------
-    # Geometry
-    # --------------------------------------------------------
 
-    def _heading_error(
+
+    def _build_vector(
         self,
-        ego,
-        waypoint,
-    ):
+        ego: carla.Vehicle,
+        waypoint: carla.Waypoint,
+        current: LaneInfo,
+        left: LaneInfo,
+        right: LaneInfo,
+    ) -> np.ndarray:
 
-        yaw = ego.get_transform().rotation.yaw
+        speed = self._speed(ego)
 
-        lane = waypoint.transform.rotation.yaw
+        heading = self._heading_error(
+            ego,
+            waypoint,
+        )
 
-        diff = yaw - lane
-
-        return diff / 180.0
-
-    def _lane_offset(
-        self,
-        ego,
-        waypoint,
-    ):
-
-        return (
+        lane_offset = (
             ego.get_location().distance(
                 waypoint.transform.location
             )
-            / 4.0
+            / max(waypoint.lane_width, 0.1)
         )
+
+        return np.array(
+            [
+                speed / MAX_SPEED,
+
+                float(waypoint.lane_id),
+
+                heading,
+
+                min(current.front.distance, MAX_DISTANCE)
+                / MAX_DISTANCE,
+
+                current.front.relative_speed / MAX_SPEED,
+
+                min(left.front.distance, MAX_DISTANCE)
+                / MAX_DISTANCE,
+
+                min(left.rear.distance, MAX_DISTANCE)
+                / MAX_DISTANCE,
+
+                min(right.front.distance, MAX_DISTANCE)
+                / MAX_DISTANCE,
+
+                min(right.rear.distance, MAX_DISTANCE)
+                / MAX_DISTANCE,
+
+                ego.get_speed_limit() / 120.0,
+
+                lane_offset,
+            ],
+            dtype=np.float32,
+        )
+
+
+    def _heading_error(
+        self,
+        ego: carla.Vehicle,
+        waypoint: carla.Waypoint,
+    ) -> float:
+
+        ego_yaw = ego.get_transform().rotation.yaw
+        lane_yaw = waypoint.transform.rotation.yaw
+
+        diff = ego_yaw - lane_yaw
+
+        while diff > 180:
+            diff -= 360
+
+        while diff < -180:
+            diff += 360
+
+        return diff / 180.0
+
+
+    @staticmethod
+    def _speed(
+        vehicle: carla.Vehicle,
+    ) -> float:
+
+        velocity = vehicle.get_velocity()
+
+        return (
+            velocity.x**2 +
+            velocity.y**2 +
+            velocity.z**2
+        ) ** 0.5
