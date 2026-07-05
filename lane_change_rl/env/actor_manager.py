@@ -57,7 +57,7 @@ class ActorManager:
 
         random.seed(cfg.traffic.seed)
 
-        @property
+    @property
     def ego(self) -> EgoVehicle | None:
         return self._ego
 
@@ -91,7 +91,7 @@ class ActorManager:
 
         return actors
 
-        def reset(self):
+    def reset(self):
 
         self.destroy_all()
 
@@ -104,160 +104,290 @@ class ActorManager:
         self._sensors.clear()
 
     # ---------------------------------------------------------
-# Ego Vehicle
-# ---------------------------------------------------------
+    # Ego Vehicle
+    # ---------------------------------------------------------
 
-def spawn_ego(self) -> EgoVehicle:
-    """
-    Spawn the ego vehicle.
-    """
+    def spawn_ego(self) -> EgoVehicle:
+        """
+        Spawn the ego vehicle.
+        """
 
-    if self._ego is not None:
-        raise SpawnError("Ego vehicle already exists.")
+        if self._ego is not None:
+            raise SpawnError("Ego vehicle already exists.")
 
-    blueprint = self._blueprints.find(
-        self._cfg.ego.blueprint
-    )
-
-    if self._cfg.ego.spawn.random:
-
-        spawn_point = random.choice(
-            self._spawn_points
+        blueprint = self._blueprints.find(
+            self._cfg.ego.blueprint
         )
 
-    else:
+        if self._cfg.ego.spawn.random:
 
-        idx = self._cfg.ego.spawn.spawn_index
+            spawn_point = random.choice(
+                self._spawn_points
+            )
 
-        spawn_point = self._spawn_points[idx]
+        else:
 
-    vehicle = self._world.try_spawn_actor(
-        blueprint,
-        spawn_point,
-    )
+            idx = self._cfg.ego.spawn.spawn_index
 
-    if vehicle is None:
-        raise SpawnError(
-            "Unable to spawn ego vehicle."
+            spawn_point = self._spawn_points[idx]
+
+        vehicle = self._world.try_spawn_actor(
+            blueprint,
+            spawn_point,
         )
 
-    self._ego = EgoVehicle(vehicle=vehicle)
+        if vehicle is None:
+            raise SpawnError(
+                "Unable to spawn ego vehicle."
+            )
 
-    self._logger.info(
-        "Spawned ego vehicle."
-    )
+        self._ego = EgoVehicle(vehicle=vehicle)
 
-    return self._ego
+        self._logger.info(
+            "Spawned ego vehicle."
+        )
+
+        return self._ego
 
     # ---------------------------------------------------------
-# Background Traffic
-# ---------------------------------------------------------
+    # Background Traffic
+    # ---------------------------------------------------------
 
-def spawn_background_traffic(self) -> int:
-    """
-    Spawn background traffic using CARLA's batch API.
+    def spawn_background_traffic(self) -> int:
+        """
+        Spawn background traffic using CARLA's batch API.
 
-    Returns
-    -------
-    int
-        Number of successfully spawned vehicles.
-    """
+        Returns
+        -------
+        int
+            Number of successfully spawned vehicles.
+        """
 
-    spawn_points = list(self._spawn_points)
+        spawn_points = list(self._spawn_points)
 
-    random.shuffle(spawn_points)
+        random.shuffle(spawn_points)
 
-    blueprints = self._blueprints.filter(
-        "vehicle.*"
-    )
-
-    batch = []
-
-    count = min(
-        self._cfg.traffic.num_vehicles,
-        len(spawn_points),
-    )
-
-    for spawn_point in spawn_points[:count]:
-
-        blueprint = random.choice(
-            blueprints
+        blueprints = self._blueprints.filter(
+            "vehicle.*"
         )
 
-        if blueprint.has_attribute("color"):
+        batch = []
 
-            color = random.choice(
-                blueprint.get_attribute("color").recommended_values
-            )
-
-            blueprint.set_attribute(
-                "color",
-                color,
-            )
-
-        if blueprint.has_attribute("driver_id"):
-
-            driver = random.choice(
-                blueprint.get_attribute("driver_id").recommended_values
-            )
-
-            blueprint.set_attribute(
-                "driver_id",
-                driver,
-            )
-
-        blueprint.set_attribute(
-            "role_name",
-            "autopilot",
+        count = min(
+            self._cfg.traffic.num_vehicles,
+            len(spawn_points),
         )
 
-        batch.append(
+        for spawn_point in spawn_points[:count]:
 
-            command.SpawnActor(
-                blueprint,
-                spawn_point,
-            ).then(
+            blueprint = random.choice(
+                blueprints
+            )
 
-                command.SetAutopilot(
-                    command.FutureActor,
-                    True,
-                    self._traffic_manager.port,
+            if blueprint.has_attribute("color"):
+
+                color = random.choice(
+                    blueprint.get_attribute("color").recommended_values
+                )
+
+                blueprint.set_attribute(
+                    "color",
+                    color,
+                )
+
+            if blueprint.has_attribute("driver_id"):
+
+                driver = random.choice(
+                    blueprint.get_attribute("driver_id").recommended_values
+                )
+
+                blueprint.set_attribute(
+                    "driver_id",
+                    driver,
+                )
+
+            blueprint.set_attribute(
+                "role_name",
+                "autopilot",
+            )
+
+            batch.append(
+
+                command.SpawnActor(
+                    blueprint,
+                    spawn_point,
+                ).then(
+
+                    command.SetAutopilot(
+                        command.FutureActor,
+                        True,
+                        self._traffic_manager.port,
+                    )
+
                 )
 
             )
 
+        responses = self._client.apply_batch_sync(
+            batch,
+            True,
         )
 
-    responses = self._client.apply_batch_sync(
-        batch,
-        True,
-    )
+        spawned = 0
 
-    spawned = 0
+        for response in responses:
 
-    for response in responses:
+            if response.error:
+                continue
 
-        if response.error:
-            continue
+            actor = self._world.get_actor(
+                response.actor_id
+            )
 
-        actor = self._world.get_actor(
-            response.actor_id
+            if actor is None:
+                continue
+
+            self._traffic.append(actor)
+
+            self._traffic_manager.register_background_vehicle(
+                actor
+            )
+
+            spawned += 1
+
+        self._logger.info(
+            "Spawned %d traffic vehicles.",
+            spawned,
         )
 
-        if actor is None:
-            continue
+        return spawned
 
-        self._traffic.append(actor)
+    # ---------------------------------------------------------
+    # Ego
+    # ---------------------------------------------------------
 
-        self._traffic_manager.register_background_vehicle(
-            actor
+    def destroy_ego(self) -> None:
+        """
+        Destroy the ego vehicle and all attached sensors.
+        """
+
+        if self._ego is None:
+            return
+
+        self._ego.destroy()
+
+        self._ego = None
+
+        self._logger.info(
+            "Destroyed ego vehicle."
         )
 
-        spawned += 1
+    # ---------------------------------------------------------
+    # Background Traffic
+    # ---------------------------------------------------------
 
-    self._logger.info(
-        "Spawned %d traffic vehicles.",
-        spawned,
-    )
+    def destroy_background_traffic(self) -> None:
+        """
+        Destroy all background traffic.
+        """
 
-    return spawned
+        if not self._traffic:
+            return
+
+        batch = [
+            command.DestroyActor(vehicle)
+            for vehicle in self._traffic
+            if vehicle.is_alive
+        ]
+
+        if batch:
+            self._client.apply_batch_sync(
+                batch,
+                True,
+            )
+
+        destroyed = len(self._traffic)
+
+        self._traffic.clear()
+
+        self._logger.info(
+            "Destroyed %d traffic vehicles.",
+            destroyed,
+        )
+
+    # ---------------------------------------------------------
+    # Sensors
+    # ---------------------------------------------------------
+
+    def destroy_sensors(self) -> None:
+        """
+        Destroy standalone sensors.
+        """
+
+        batch = [
+            command.DestroyActor(sensor)
+            for sensor in self._sensors
+            if sensor.is_alive
+        ]
+
+        if batch:
+            self._client.apply_batch_sync(
+                batch,
+                True,
+            )
+
+        self._sensors.clear()
+
+    # ---------------------------------------------------------
+    # Cleanup
+    # ---------------------------------------------------------
+
+    def destroy_all(self) -> None:
+        """
+        Destroy every actor owned by ActorManager.
+        """
+
+        self.destroy_sensors()
+
+        self.destroy_background_traffic()
+
+        self.destroy_ego()
+
+        self._walkers.clear()
+
+        self._logger.info(
+            "Actor cleanup complete."
+        )
+
+    # ---------------------------------------------------------
+    # Helpers
+    # ---------------------------------------------------------
+
+    def random_spawn_point(self) -> carla.Transform:
+        """
+        Return a random spawn point.
+        """
+
+        return random.choice(
+            self._spawn_points
+        )
+
+
+    def available_spawn_points(self):
+        """
+        Return all spawn points.
+        """
+
+        return tuple(self._spawn_points)
+
+
+    def number_of_traffic(self) -> int:
+
+        return len(self._traffic)
+
+
+    def has_ego(self) -> bool:
+
+        return self._ego is not None
+
+    

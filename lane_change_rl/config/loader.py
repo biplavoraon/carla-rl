@@ -125,29 +125,25 @@ class Config:
 # Loader
 # ---------------------------------------------------------------------
 
+CONFIG_PATH = (
+    Path(__file__).resolve().parent / "config.yaml"
+)
 
-def load_config(path: str | Path = "configs/config.yaml") -> Config:
-    """
-    Load YAML configuration.
 
-    Parameters
-    ----------
-    path : str | Path
-        Path to config.yaml.
+def load_config(path: str | Path | None = None):
 
-    Returns
-    -------
-    Config
-        Parsed configuration object.
-    """
-
-    path = Path(path)
+    if path is None:
+        path = CONFIG_PATH
+    else:
+        path = Path(path)
 
     if not path.exists():
-        raise FileNotFoundError(f"Configuration file not found: {path}")
+        raise FileNotFoundError(
+            f"Configuration file not found: {path}"
+        )
 
     with path.open("r", encoding="utf-8") as f:
-        data: dict[str, Any] = yaml.safe_load(f)
+        data = yaml.safe_load(f)
 
     return Config(
         carla=CarlaConfig(**data["carla"]),

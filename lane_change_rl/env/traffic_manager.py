@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import carla
 
-from configs.loader import TrafficConfig
-
+from lane_change_rl.config.loader import TrafficConfig
 
 class TrafficManager:
 
