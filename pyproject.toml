@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lane-change-rl"
+version = "0.1.0"
+description = "Lane Change Decision Making using Reinforcement Learning in CARLA"
+readme = "README.md"
+requires-python = ">=3.10"
+
+authors = [
+    { name = "Biplav Oraon" }
+]
+
+dependencies = [
+    "numpy>=1.24",
+    "PyYAML>=6.0",
+    "gymnasium>=0.29",
+    "opencv-python>=4.10",
+    "stable-baselines3>=2.3",
+    "pygame>=2.5"
+]
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+include = ["lane_change_rl*"]
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

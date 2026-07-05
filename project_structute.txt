@@ -1,0 +1,33 @@
+lane-change-rl/
+│
+├── pyproject.toml
+│
+├── README.md
+│
+├── lane_change_rl/
+│   │
+│   ├── config/
+│   │
+│   ├── env/
+│   │     world.py
+│   │     actor_manager.py
+│   │     traffic_manager.py
+│   │     map_manager.py
+│   │     debug_manager.py
+│   │
+│   ├── sensors/
+│   │     camera.py
+│   │     collision.py
+│   │     lane_invasion.py
+│   │
+│   ├── controllers/
+│   │
+│   ├── rl/
+│   │
+│   ├── utils/
+│   │
+│   └── common/
+│
+├── scripts/
+│
+└── tests/
