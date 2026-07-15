@@ -41,6 +41,19 @@ class ObservationExtractor:
 
         ego = self.actors.ego_vehicle
 
+        # print(
+        #     "ego:",
+        #     ego,
+        #     "alive:",
+        #     None if ego is None else ego.is_alive,
+        # )
+
+        if ego is None:
+            raise RuntimeError("Ego vehicle not registered")
+
+        if not ego.is_alive:
+            raise RuntimeError("Ego vehicle is not alive")
+
         wp = self.map.get_waypoint(
             ego.get_location()
         )
@@ -296,18 +309,38 @@ class ObservationExtractor:
             / max(waypoint.lane_width, 0.1)
         )
 
+        MAX_LANE_ID = 5.0
+
+        target_lane = np.clip(
+            self.world.target_lane_id / MAX_LANE_ID,
+            -1.0,
+            1.0,
+        )
+
         return np.array(
             [
                 speed / MAX_SPEED,
 
-                float(waypoint.lane_id),
+                np.clip(
+                    waypoint.lane_id / MAX_LANE_ID,
+                    -1.0,
+                    1.0,
+                ),
 
-                heading,
+                np.clip(
+                    heading,
+                    -1.0,
+                    1.0,
+                ),
 
                 min(current.front.distance, MAX_DISTANCE)
                 / MAX_DISTANCE,
 
-                current.front.relative_speed / MAX_SPEED,
+                np.clip(
+                    current.front.relative_speed / MAX_SPEED,
+                    -1.0,
+                    1.0,
+                ),
 
                 min(left.front.distance, MAX_DISTANCE)
                 / MAX_DISTANCE,
@@ -323,7 +356,13 @@ class ObservationExtractor:
 
                 ego.get_speed_limit() / 120.0,
 
-                lane_offset,
+                np.clip(
+                    lane_offset,
+                    0.0,
+                    1.0,
+                ),
+
+                target_lane,
             ],
             dtype=np.float32,
         )

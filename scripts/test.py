@@ -1,18 +1,14 @@
-from lane_change_rl.env.world import CarlaWorld
+from stable_baselines3.common.env_checker import check_env
 
+from lane_change_rl.env.lane_change_env import LaneChangeEnv
 
-def main():
+env = LaneChangeEnv()
 
-    with CarlaWorld() as sim:
+check_env(
+    env,
+    warn=True,
+)
 
-        sim.actors.spawn_ego()
+print("Environment OK")
 
-        sim.actors.spawn_background_traffic()
-
-        while True:
-
-            sim.tick()
-
-
-if __name__ == "__main__":
-    main()
+env.close()

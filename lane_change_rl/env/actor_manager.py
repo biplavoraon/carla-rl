@@ -19,6 +19,7 @@ from lane_change_rl.models import EgoVehicle
 from lane_change_rl.env.exceptions import SpawnError
 from lane_change_rl.env.traffic_manager import TrafficManager
 from lane_change_rl.config.loader import Config
+import time
 
 
 class ActorManager:
@@ -54,6 +55,22 @@ class ActorManager:
         self._spawn_points = (
             self._world.get_map().get_spawn_points()
         )
+
+        self._valid_spawn_points = []
+
+        for spawn in self._spawn_points:
+
+            wp = self._world.get_map().get_waypoint(spawn.location)
+
+            left = wp.get_left_lane()
+            right = wp.get_right_lane()
+
+            if (
+                left is not None and left.lane_type == carla.LaneType.Driving
+            ) or (
+                right is not None and right.lane_type == carla.LaneType.Driving
+            ):
+                self._valid_spawn_points.append(spawn)
 
         random.seed(cfg.traffic.seed)
 
@@ -103,13 +120,45 @@ class ActorManager:
 
         self._sensors.clear()
 
+
+    def reset_ego(self):
+
+        spawn = random.choice(self._spawn_points)
+
+        ego = self._ego.vehicle
+
+        # print(
+        #     "alive:",
+        #     ego.is_alive,
+        #     "id:",
+        #     ego.id,
+        # )
+
+        ego.set_transform(spawn)
+
+        ego.set_target_velocity(
+            carla.Vector3D()
+        )
+
+        ego.set_target_angular_velocity(
+            carla.Vector3D()
+        )
+
+        ego.apply_control(
+            carla.VehicleControl(
+                throttle=0.0,
+                brake=1.0,
+            )
+        )
+
     # ---------------------------------------------------------
     # Ego Vehicle
     # ---------------------------------------------------------
 
     def spawn_ego(self) -> EgoVehicle:
         """
-        Spawn the ego vehicle.
+        Spawn the ego vehicle on a lane that has at least one
+        adjacent driving lane.
         """
 
         if self._ego is not None:
@@ -119,33 +168,64 @@ class ActorManager:
             self._cfg.ego.blueprint
         )
 
-        if self._cfg.ego.spawn.random:
+        spawn_points = list(self._valid_spawn_points)
+        random.shuffle(spawn_points)
 
-            spawn_point = random.choice(
-                self._spawn_points
+        vehicle = None
+
+        for spawn_point in spawn_points:
+
+            actor = self._world.try_spawn_actor(
+                blueprint,
+                spawn_point,
             )
 
-        else:
+            if actor is None:
+                continue
 
-            idx = self._cfg.ego.spawn.spawn_index
+            waypoint = self._world.get_map().get_waypoint(
+                actor.get_location()
+            )
 
-            spawn_point = self._spawn_points[idx]
+            if waypoint.lane_type != carla.LaneType.Driving:
+                actor.destroy()
+                continue
 
-        vehicle = self._world.try_spawn_actor(
-            blueprint,
-            spawn_point,
-        )
+            left = waypoint.get_left_lane()
+            right = waypoint.get_right_lane()
+
+            left_valid = (
+                left is not None
+                and left.lane_type == carla.LaneType.Driving
+            )
+
+            right_valid = (
+                right is not None
+                and right.lane_type == carla.LaneType.Driving
+            )
+
+            # Accept only spawn points from which a lane change
+            # is actually possible.
+            if left_valid or right_valid:
+
+                vehicle = actor
+                break
+
+            # Reject this spawn point
+            actor.destroy()
 
         if vehicle is None:
             raise SpawnError(
-                "Unable to spawn ego vehicle."
+                "Unable to spawn ego vehicle on a valid lane."
             )
 
         self._traffic_manager.register_ego_vehicle(
             vehicle
         )
 
-        self._ego = EgoVehicle(vehicle=vehicle)
+        self._ego = EgoVehicle(
+            vehicle=vehicle,
+        )
 
         self._logger.info(
             "Spawned ego vehicle."
@@ -270,15 +350,15 @@ class ActorManager:
     # Ego
     # ---------------------------------------------------------
 
-    def destroy_ego(self) -> None:
-        """
-        Destroy the ego vehicle and all attached sensors.
-        """
+    def destroy_ego(self):
 
         if self._ego is None:
             return
 
-        self._ego.destroy()
+        try:
+            self._ego.destroy()
+        except RuntimeError:
+            pass
 
         self._ego = None
 
@@ -346,10 +426,7 @@ class ActorManager:
     # Cleanup
     # ---------------------------------------------------------
 
-    def destroy_all(self) -> None:
-        """
-        Destroy every actor owned by ActorManager.
-        """
+    def destroy_all(self):
 
         self.destroy_sensors()
 
@@ -357,7 +434,10 @@ class ActorManager:
 
         self.destroy_ego()
 
+        self._traffic.clear()
         self._walkers.clear()
+        self._sensors.clear()
+        self._ego = None
 
         self._logger.info(
             "Actor cleanup complete."

@@ -34,21 +34,51 @@ class EgoVehicle:
     def destroy(self) -> None:
         """
         Destroy every attached sensor followed by the vehicle.
+        Safe to call multiple times.
         """
 
         sensors = [
-            self.rgb_camera,
-            self.collision_sensor,
-            self.lane_invasion_sensor,
-            self.lidar,
-            self.radar,
-            self.gnss,
-            self.imu,
+            "rgb_camera",
+            "collision_sensor",
+            "lane_invasion_sensor",
+            "lidar",
+            "radar",
+            "gnss",
+            "imu",
         ]
 
-        for sensor in sensors:
-            if sensor is not None and sensor.is_alive:
-                sensor.destroy()
+        for name in sensors:
 
-        if self.vehicle.is_alive:
-            self.vehicle.destroy()
+            sensor = getattr(self, name)
+
+            if sensor is None:
+                continue
+
+            try:
+
+                sensor.stop()
+
+            except Exception:
+                pass
+
+            try:
+
+                if sensor.is_alive:
+                    sensor.destroy()
+
+            except RuntimeError:
+                pass
+
+            setattr(self, name, None)
+
+        if self.vehicle is not None:
+
+            try:
+
+                if self.vehicle.is_alive:
+                    self.vehicle.destroy()
+
+            except RuntimeError:
+                pass
+
+            self.vehicle = None

@@ -21,6 +21,8 @@ from lane_change_rl.env.traffic_manager import TrafficManager
 from lane_change_rl.env.utils import setup_logger, set_random_seed
 from lane_change_rl.env.actor_manager import ActorManager
 
+import random
+
 
 class CarlaWorld:
     """
@@ -35,6 +37,12 @@ class CarlaWorld:
             self.__class__.__name__,
             self.cfg.logging.level,
         )
+
+        self.target_direction = 0
+
+        self.target_lane_id = None
+
+        self.lane_change_attempts = 0
 
         # ---------------------------------------------------------
         # Random seed
@@ -75,16 +83,18 @@ class CarlaWorld:
 
         if current_map != self.cfg.map.town:
 
-            print(f"Loading map {self.cfg.map.town}")
+            # print(f"Loading map {self.cfg.map.town}")
 
-            self.world = self.client.load_world_if_different(
+            self.client.load_world(
                 self.cfg.map.town,
                 reset_settings=False,
             )
 
+            self.world = self.client.get_world()
+
         else:
 
-            print("Reusing existing world")
+            # print("Reusing existing world")
 
             self.world = current_world
 
@@ -134,17 +144,6 @@ class CarlaWorld:
             self.map.name,
         )
 
-        print("World:", self.world.id)
-        print("Map:", self.world.get_map().name)
-        print(
-            "Vehicles:",
-            len(
-                self.world.get_actors().filter(
-                    "vehicle.*"
-                )
-            ),
-        )
-
     # ---------------------------------------------------------
     # Settings
     # ---------------------------------------------------------
@@ -169,26 +168,151 @@ class CarlaWorld:
     # Simulation
     # ---------------------------------------------------------
 
+
+    def initialize(self):
+
+        self.actors.spawn_ego()
+
+        self.tick()
+
+        self.actors.spawn_background_traffic()
+
+        self.tick()
+
+
     def tick(self):
 
         return self.world.tick()
 
+
+
+    def reset_episode(self):
+
+        self.actors.reset()
+
+        ego = self.actors.spawn_ego()
+
+        self.tick()
+
+        self.follow_ego()
+
+        self.actors.spawn_background_traffic()
+
+        self.tick()
+
+        self.lane_change_attempts = 0
+
+        waypoint = self.map.get_waypoint(
+            ego.vehicle.get_location()
+        )
+
+        # print("Current lane:", waypoint.lane_id)
+
+        targets = []
+
+        left = waypoint.get_left_lane()
+
+        if (left is not None and left.lane_type == carla.LaneType.Driving):
+            targets.append(left)
+
+        right = waypoint.get_right_lane()
+
+        if (right is not None and right.lane_type == carla.LaneType.Driving):
+            targets.append(right)
+
+        # print("Left: ", left)
+        # print("Right:", right)
+
+        # if left is not None:
+        #     print("Left lane id:", left.lane_type)
+
+        # if right is not None:
+        #     print("Right lane id:", right.lane_type)
+
+        if not targets:
+            raise RuntimeError(
+                "No adjacent lane available."
+            )
+
+        target_wp = random.choice(targets)
+
+        self.target_lane_id = target_wp.lane_id
+
+        if (
+            left is not None
+            and target_wp.lane_id == left.lane_id
+        ):
+            self.target_direction = -1
+        else:
+            self.target_direction = 1
+
+
     # ---------------------------------------------------------
     # Cleanup
     # ---------------------------------------------------------
+
+    # def close(self):
+
+    #     if self.actors is not None:
+    #         self.actors.destroy_all()
+
+    #     self.world.apply_settings(
+    #         self.original_settings
+    #     )
+
+    #     self.logger.info(
+    #         "World closed."
+    #     )
+
+
+    def follow_ego(
+        self,
+        distance: float = 6.0,
+        height: float = 2.5,
+        pitch: float = -10.0,
+    ) -> None:
+        """
+        Position the spectator behind the ego vehicle.
+        """
+
+        ego = self.actors.ego_vehicle
+
+        if ego is None or not ego.is_alive:
+            return
+
+        transform = ego.get_transform()
+
+        spectator = self.world.get_spectator()
+
+        spectator.set_transform(
+            carla.Transform(
+                transform.transform(
+                    carla.Location(
+                        x=-distance,
+                        z=height,
+                    )
+                ),
+                carla.Rotation(
+                    pitch=pitch,
+                    yaw=transform.rotation.yaw,
+                    roll=0.0,
+                ),
+            )
+        )
 
     def close(self):
 
         if self.actors is not None:
             self.actors.destroy_all()
 
+        # Give CARLA one tick to process destruction
+        self.world.tick()
+
         self.world.apply_settings(
             self.original_settings
         )
 
-        self.logger.info(
-            "World closed."
-        )
+        self.logger.info("World closed.")
 
     # ---------------------------------------------------------
     # Context manager

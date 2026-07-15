@@ -73,13 +73,21 @@ class TrafficManager:
         self,
         vehicle: carla.Vehicle,
     ):
-        """
-        Reserved for future use.
 
-        The RL agent will control the ego vehicle,
-        so we intentionally do NOT enable autopilot.
-        """
-        pass
+        vehicle.set_autopilot(
+            True,
+            self.port,
+        )
+
+        self._tm.auto_lane_change(
+            vehicle,
+            False,
+        )
+
+        self._tm.vehicle_percentage_speed_difference(
+            vehicle,
+            0.0,
+        )
 
     # ---------------------------------------------------------
     # Per Vehicle Controls
