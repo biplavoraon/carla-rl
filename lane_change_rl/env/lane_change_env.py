@@ -26,7 +26,7 @@ class LaneChangeEnv(gym.Env):
         self.observation_space = spaces.Box(
             low=-1.0,
             high=1.0,
-            shape=(14,),
+            shape=(12,),
             dtype=np.float32,
         )
 

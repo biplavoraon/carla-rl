@@ -2,6 +2,10 @@ import json
 
 import matplotlib.pyplot as plt
 import numpy as np
+from pathlib import Path
+
+PLOT_DIR = Path("plots")
+PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 with open("evaluation.json") as f:
@@ -221,6 +225,91 @@ plt.savefig("rolling_reward.png")
 
 
 ####################################################
+# Cumulative Success Rate
+####################################################
+
+running = []
+
+count = 0
+
+for i, s in enumerate(success, start=1):
+
+    count += s
+
+    running.append(100 * count / i)
+
+plt.figure(figsize=(8,4))
+
+plt.plot(running)
+
+plt.xlabel("Episode")
+plt.ylabel("Success Rate (%)")
+
+plt.title("Cumulative Success Rate")
+
+plt.grid(True)
+
+plt.tight_layout()
+
+plt.savefig(PLOT_DIR / "cumulative_success.png")
+
+
+
+####################################################
+# Collision Rate (Rolling)
+####################################################
+
+window = 20
+
+collision = [e["collision"] for e in episodes]
+
+rolling_collision = []
+
+for i in range(len(collision)):
+
+    start = max(0, i-window+1)
+
+    rolling_collision.append(
+        100*np.mean(collision[start:i+1])
+    )
+
+plt.figure(figsize=(8,4))
+
+plt.plot(rolling_collision)
+
+plt.xlabel("Episode")
+
+plt.ylabel("Collision Rate (%)")
+
+plt.title("Rolling Collision Rate")
+
+plt.grid(True)
+
+plt.tight_layout()
+
+plt.savefig(PLOT_DIR / "rolling_collision.png")
+
+
+###################################################
+# Boxplot of rewards
+####################################################
+
+
+plt.figure(figsize=(5,5))
+
+plt.boxplot(rewards)
+
+plt.ylabel("Reward")
+
+plt.title("Reward Distribution")
+
+plt.tight_layout()
+
+plt.savefig(PLOT_DIR / "reward_boxplot.png")
+
+
+
+####################################################
 # Left Right Success
 ####################################################
 
@@ -265,3 +354,23 @@ plt.tight_layout()
 plt.savefig("direction_success.png")
 
 print("Plots saved.")
+
+####################################################
+# Direction Success Rate
+####################################################
+
+
+plt.figure(figsize=(6,4))
+
+plt.bar(
+    ["LEFT Episodes", "RIGHT Episodes"],
+    [len(left), len(right)]
+)
+
+plt.ylabel("Count")
+
+plt.title("Evaluation Episode Distribution")
+
+plt.tight_layout()
+
+plt.savefig(PLOT_DIR / "direction_counts.png")
